@@ -1,29 +1,112 @@
 [
   {
-    "id": "feb2c7a3-1c86-4d8a-b24a-c7edeb3b3a91",
-    "type": "fact",
-    "key": "name",
-    "value": "Aaditya",
-    "confidence": 0.7,
-    "created_at": "2026-02-10T16:10:40.774717",
-    "last_updated": "2026-02-10T16:10:40.774717"
-  },
-  {
-    "id": "6f7d6b47-4ab0-427d-a364-acb7ce9c2172",
-    "type": "fact",
-    "key": "has_not_shared_favourite_food",
-    "value": "true",
-    "confidence": 0.7,
-    "created_at": "2026-02-10T16:12:42.869218",
-    "last_updated": "2026-02-10T16:12:42.869218"
-  },
-  {
     "id": "7a134aa5-416d-4bd1-a1e0-a6d7bd60f82d",
+    "user_id": "guest",
     "type": "preference",
-    "key": "preference",
-    "value": "eating pizza",
+    "key": "favorite_food",
+    "value": "pizza",
     "confidence": 0.7,
     "created_at": "2026-02-10T16:12:52.326071",
     "last_updated": "2026-02-10T16:12:52.326071"
+  },
+  {
+    "id": "6c471a34-a0a5-4c00-b006-2d0750318048",
+    "user_id": "guest",
+    "type": "fact",
+    "key": "anime_preference",
+    "value": "AOT (Attack on Titan)",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T16:32:59.733383",
+    "last_updated": "2026-02-10T16:32:59.733383"
+  },
+  {
+    "id": "2013f910-0fd9-42cd-99a1-af77d9a1f66d",
+    "user_id": "guest",
+    "type": "fact",
+    "key": "interest",
+    "value": "watching anime",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T16:33:47.110025",
+    "last_updated": "2026-02-10T16:33:47.110025"
+  },
+  {
+    "id": "05d6686e-c486-4820-a043-50c6668a5698",
+    "user_id": "aaditya_03",
+    "type": "preference",
+    "key": "favorite_food",
+    "value": "pizza",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:01:05.016310",
+    "last_updated": "2026-02-10T19:01:05.016310"
+  },
+  {
+    "id": "6ed4251d-f7f9-47e0-b054-6ae7f5161933",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "anime_preference",
+    "value": "AOT (Attack on Titan)",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:01:05.024400",
+    "last_updated": "2026-02-10T19:01:05.024400"
+  },
+  {
+    "id": "be6b33b1-00cd-499e-81ec-905428179eac",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "interest",
+    "value": "going gym",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:01:05.033272",
+    "last_updated": "2026-02-10T19:11:10.407445"
+  },
+  {
+    "id": "f47b9eaa-a926-44a0-a8f0-c2d18b158b7b",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "location",
+    "value": "IIIT Lucknow",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:06:32.149079",
+    "last_updated": "2026-02-10T19:06:32.149079"
+  },
+  {
+    "id": "6fbdb686-78d8-45e2-b421-cecce4c3b097",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "favourite anime character",
+    "value": "Gojo from JJK",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:07:34.738994",
+    "last_updated": "2026-02-10T19:07:34.738994"
+  },
+  {
+    "id": "23372020-0d4e-4ab2-ae2d-e4c306df357e",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "year of graduation",
+    "value": "2nd",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:07:58.686552",
+    "last_updated": "2026-02-10T19:07:58.686552"
+  },
+  {
+    "id": "c3921917-9e63-4b95-988f-db65aaa96f90",
+    "user_id": "aaditya_03",
+    "type": "fact",
+    "key": "name",
+    "value": "Aaditya Kothari",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:09:48.571757",
+    "last_updated": "2026-02-10T19:09:48.571757"
+  },
+  {
+    "id": "e6acc20a-6694-4955-a652-c62fc8b21ba3",
+    "user_id": "aaditya_03",
+    "type": "preference",
+    "key": "favourite soft drink",
+    "value": "Coca Cola",
+    "confidence": 0.7,
+    "created_at": "2026-02-10T19:10:13.347096",
+    "last_updated": "2026-02-10T19:10:13.347096"
   }
 ]

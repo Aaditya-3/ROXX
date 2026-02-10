@@ -40,7 +40,8 @@ def generate_response(prompt: str) -> str:
         model=GROQ_MODEL,
         messages=[
             {"role": "user", "content": prompt}
-        ]
+        ],
+        temperature=0.55,
     )
 
     if not response or not response.choices:

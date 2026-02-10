@@ -1,127 +1,176 @@
 """
 Memory Extractor
 
-Uses LLM to extract long-term memories from user messages.
-Only extracts persistent, reusable information.
+Strict extractor that stores only explicit, stable user facts/preferences.
 """
 
 import json
 import re
 from typing import Optional
+
+from backend.app.core.llm.groq_client import generate_response
 from .memory_schema import Memory
 from .memory_store import get_memory_store
-from backend.app.core.llm.groq_client import generate_response
 
 
-def _extract_patterns(user_message: str) -> Optional[Memory]:
-    """
-    Pattern-based memory extraction as fallback.
-    Extracts common patterns without calling LLM.
-    """
+NEVER_EXTRACT_VALUES = {
+    "aria",
+    "i understand",
+    "i get it",
+    "as an ai",
+}
+
+NEVER_EXTRACT_KEYS = {
+    "assistant_name",
+    "ai_name",
+}
+
+INVALID_NAME_WORDS = {
+    "pursuing",
+    "working",
+    "studying",
+    "trying",
+    "doing",
+    "going",
+    "learning",
+}
+
+
+def _is_memory_supported_by_message(key: str, value: str, user_message: str) -> bool:
+    msg = (user_message or "").lower()
+    key_l = (key or "").strip().lower()
+    value_l = (value or "").strip().lower()
+    if not msg or not value_l:
+        return False
+    if key_l in NEVER_EXTRACT_KEYS:
+        return False
+    if value_l in NEVER_EXTRACT_VALUES:
+        return False
+
+    if value_l in msg:
+        return True
+
+    trusted_keys = {
+        "name",
+        "role",
+        "occupation",
+        "location",
+        "anime_preference",
+        "language_preference",
+        "tool_preference",
+        "preference",
+    }
+    if key_l in trusted_keys:
+        tokens = [t for t in value_l.split() if len(t) > 2]
+        if tokens and any(t in msg for t in tokens):
+            return True
+
+    return False
+
+
+def _extract_patterns(user_message: str, user_id: str) -> list[Memory]:
+    memories: list[Memory] = []
     message_lower = user_message.lower()
-    
-    # Pattern: "I'm [name]" or "My name is [name]"
+
+    # Keep "I'm" preamble flexible, but keep captured name strict.
     name_patterns = [
         r"i'?m\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
         r"my\s+name\s+is\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
         r"i\s+am\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
-        r"call\s+me\s+([A-Z][a-z]+)"
+        r"call\s+me\s+([A-Z][a-z]+)",
     ]
     for pattern in name_patterns:
-        match = re.search(pattern, user_message, re.IGNORECASE)
+        match = re.search(pattern, user_message)
         if match:
             name = match.group(1).strip()
-            if len(name) > 1 and len(name) < 50:  # Reasonable name length
-                return Memory.create(type="fact", key="name", value=name, confidence=0.7)
-    
-    # Pattern: "I prefer [X]" or "I like [X]"
+            if 1 < len(name) < 50 and name.lower() not in INVALID_NAME_WORDS:
+                memories.append(Memory.create(user_id=user_id, type="fact", key="name", value=name, confidence=0.7))
+                break
+
+    # Food-specific preference capture.
+    favorite_food_patterns = [
+        r"my\s+favo(?:u)?rite\s+food\s+is\s+([^,.!?]+)",
+        r"i\s+love\s+eating\s+([^,.!?]+)",
+        r"i\s+like\s+eating\s+([^,.!?]+)",
+    ]
+    for pattern in favorite_food_patterns:
+        match = re.search(pattern, message_lower)
+        if match:
+            food = match.group(1).strip()
+            if 1 < len(food) < 80:
+                memories.append(
+                    Memory.create(
+                        user_id=user_id,
+                        type="preference",
+                        key="favorite_food",
+                        value=food,
+                        confidence=0.7,
+                    )
+                )
+                break
+
     preference_patterns = [
         r"i\s+prefer\s+([^,.!?]+)",
         r"i\s+like\s+([^,.!?]+)",
-        r"my\s+favorite\s+([^,.!?]+)\s+is\s+([^,.!?]+)"
+        r"my\s+favorite\s+([^,.!?]+)\s+is\s+([^,.!?]+)",
     ]
     for pattern in preference_patterns:
         match = re.search(pattern, message_lower)
-        if match:
-            if len(match.groups()) == 2:
-                key = match.group(1).strip()
-                value = match.group(2).strip()
-            else:
-                value = match.group(1).strip()
-                key = "preference"
-            if len(value) > 2 and len(value) < 100:
-                return Memory.create(type="preference", key=key, value=value, confidence=0.7)
-    
-    return None
+        if not match:
+            continue
+        if len(match.groups()) == 2:
+            key = match.group(1).strip()
+            value = match.group(2).strip()
+        else:
+            key = "preference"
+            value = match.group(1).strip()
+        if value.startswith("eating "):
+            # Already handled in favorite_food_patterns to avoid duplicate generic preference.
+            continue
+        if key in {"food", "favorite food", "favourite food"}:
+            key = "favorite_food"
+        if 2 < len(value) < 100:
+            memories.append(Memory.create(user_id=user_id, type="preference", key=key, value=value, confidence=0.7))
+
+    return memories
 
 
-def extract_memory(user_message: str) -> Optional[Memory]:
-    """
-    Extract long-term memory from user message if present.
-    
-    Returns Memory object if found, None otherwise.
-    Uses pattern matching first, then LLM extraction.
-    """
-    # Try pattern-based extraction first (fast, no API call)
-    pattern_memory = _extract_patterns(user_message)
-    if pattern_memory:
-        stored = get_memory_store().add_or_update_memory(pattern_memory)
-        if stored:
-            print(f"Memory stored (pattern): {stored.key} = {stored.value}")
-        return stored
-    
-    # Fallback to LLM-based extraction
-    prompt = """You are a memory extraction system helping to build a long-term profile of the USER.
+def extract_memory(user_message: str, user_id: str) -> Optional[Memory]:
+    pattern_memories = _extract_patterns(user_message, user_id)
+    stored_any = None
+    if pattern_memories:
+        for memory in pattern_memories:
+            stored = get_memory_store().add_or_update_memory(memory)
+            if stored:
+                stored_any = stored
+                print(f"Memory stored (pattern): {stored.key} = {stored.value}")
+        # Pattern path is strict and explicit; avoid LLM extraction here.
+        return stored_any
 
-ONLY extract information that was explicitly provided by the USER in their own words.
-Do NOT extract or infer information from the ASSISTANT's suggestions, examples, or questions.
-For example, if the assistant mentions pizza but the user never confirms they like pizza,
-you MUST NOT store \"pizza\" as a preference.
+    prompt = """You are a skeptical auditor.
 
-EXTRACT these types of information:
-- Personal facts: name, age, location, occupation, role, company, education, skills, hobbies
-- Preferences: programming languages, tools, frameworks, styles, formats, colors, themes
-- Constraints: deadlines, budgets, time zones, availability, limitations
-- Context: current projects, goals, interests, relationships, background
-- Any stable information about the user that would be useful to remember
+Source of Truth:
+- ONLY extract facts explicitly stated by the USER.
+- If the ASSISTANT suggested something (e.g., "Do you like coding?") and the user didn't say "Yes," you MUST NOT store it.
+- If the user's message is ambiguous, do not guess. Return null.
 
-IMPORTANT: Be proactive, but ONLY based on what the USER actually states or clearly confirms.
+Never extract:
+- AI names (like "Aria")
+- Polite filler ("I understand")
+- Hypothetical examples used in the conversation
 
-Examples of what to extract:
-- "I'm John" → fact: name = John
-- "I prefer Python" → preference: programming_language = Python
-- "I work at Google" → fact: company = Google
-- "I'm a software engineer" → fact: occupation = software engineer
-- "I'm in New York" → fact: location = New York
-- "I like dark themes" → preference: theme = dark
-- "My deadline is next week" → constraint: deadline = next week
-
-DO NOT extract:
-- Simple greetings without information (hello, hi, thanks)
-- Pure emotions without context (happy, sad)
-- One-off questions that don't reveal user info
-
-Return JSON format:
-{
-  "type": "preference" | "constraint" | "fact",
-  "key": "descriptive_key_name",
-  "value": "the actual information"
-}
-
-If you find ANY extractable information from the USER, return the JSON.
-Only return null if there is absolutely no personal information provided by the USER.
+Output format:
+- Return either null, or a JSON array.
+- Each object must be: {"type":"fact|preference|constraint","key":"...","value":"..."}.
+- Do not include anything else.
 
 User message: """ + user_message
-    
+
     try:
-        # Call LLM to extract memory
         response = generate_response(prompt)
-        
         if not response:
-            print("Memory extraction: Empty response from LLM")
             return None
-        
-        # Clean response - remove markdown code blocks if present
+
         response = response.strip()
         if response.startswith("```json"):
             response = response[7:]
@@ -130,56 +179,56 @@ User message: """ + user_message
         if response.endswith("```"):
             response = response[:-3]
         response = response.strip()
-        
-        # Handle null response
         if response.lower() == "null" or not response:
             return None
-        
-        # Parse JSON
+
         try:
             data = json.loads(response)
         except json.JSONDecodeError:
-            # Invalid JSON, no memory extracted
             return None
-        
-        # Validate and create memory
-        if isinstance(data, dict) and "type" in data and "key" in data and "value" in data:
-            # Validate type
-            if data["type"] not in ["preference", "constraint", "fact"]:
-                return None
-            
-            # Validate key and value are strings
-            if not isinstance(data["key"], str) or not isinstance(data["value"], str):
-                return None
-            
-            try:
-                memory = Memory.create(
-                    type=data["type"],
-                    key=data["key"],
-                    value=data["value"],
-                    confidence=0.7
-                )
-                
-                # Store in memory store
-                stored = get_memory_store().add_or_update_memory(memory)
-                if stored:
-                    print(f"Memory stored: {stored.key} = {stored.value} (confidence: {stored.confidence:.2f})")
-                return stored
-            except (ValueError, TypeError) as e:
-                # Invalid memory data
-                print(f"Invalid memory data: {e}")
-                return None
-        
-        return None
-        
+
+        payload = [data] if isinstance(data, dict) else data if isinstance(data, list) else None
+        if payload is None:
+            return None
+
+        stored_any = None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            if not {"type", "key", "value"}.issubset(item.keys()):
+                continue
+
+            m_type = item.get("type")
+            m_key = item.get("key")
+            m_value = item.get("value")
+            if m_type not in ["preference", "constraint", "fact"]:
+                continue
+            if not isinstance(m_key, str) or not isinstance(m_value, str):
+                continue
+            if m_key.strip().lower() in NEVER_EXTRACT_KEYS:
+                continue
+            if m_value.strip().lower() in NEVER_EXTRACT_VALUES:
+                continue
+            if not _is_memory_supported_by_message(m_key, m_value, user_message):
+                continue
+
+            memory = Memory.create(
+                user_id=user_id,
+                type=m_type,
+                key=m_key.strip(),
+                value=m_value.strip(),
+                confidence=0.7,
+            )
+            stored = get_memory_store().add_or_update_memory(memory)
+            if stored:
+                stored_any = stored
+                print(f"Memory stored: {stored.key} = {stored.value} (confidence: {stored.confidence:.2f})")
+
+        return stored_any
+
     except RuntimeError as e:
-        # API key missing or Groq API/model error - log but don't crash
         print(f"Memory extraction API error (non-fatal): {e}")
         return None
-    except json.JSONDecodeError:
-        # Invalid JSON, no memory extracted
-        return None
     except Exception as e:
-        # Log error but don't crash (e.g. network, rate limit, model error)
         print(f"Memory extraction error (non-fatal): {type(e).__name__}: {e}")
         return None

@@ -16,6 +16,7 @@ class Memory:
     """Represents a single memory entry."""
     
     id: str
+    user_id: str
     type: Literal["preference", "constraint", "fact"]
     key: str
     value: str
@@ -32,12 +33,19 @@ class Memory:
             raise ValueError("Type must be 'preference', 'constraint', or 'fact'")
     
     @classmethod
-    def create(cls, type: Literal["preference", "constraint", "fact"], 
-               key: str, value: str, confidence: float = 0.7) -> "Memory":
+    def create(
+        cls,
+        user_id: str,
+        type: Literal["preference", "constraint", "fact"],
+        key: str,
+        value: str,
+        confidence: float = 0.7,
+    ) -> "Memory":
         """Create a new memory with auto-generated ID and timestamps."""
         now = datetime.now()
         return cls(
             id=str(uuid.uuid4()),
+            user_id=user_id,
             type=type,
             key=key,
             value=value,
@@ -50,6 +58,7 @@ class Memory:
         """Convert memory to dictionary for JSON serialization."""
         return {
             "id": self.id,
+            "user_id": self.user_id,
             "type": self.type,
             "key": self.key,
             "value": self.value,
@@ -63,6 +72,7 @@ class Memory:
         """Create memory from dictionary."""
         return cls(
             id=data["id"],
+            user_id=data.get("user_id", "guest"),
             type=data["type"],
             key=data["key"],
             value=data["value"],
