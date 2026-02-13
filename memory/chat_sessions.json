@@ -1426,7 +1426,7 @@
     "user_id": "aaditya_03",
     "title": "New Chat",
     "created_at": "2026-02-12T20:15:07.430745",
-    "updated_at": "2026-02-12T20:15:14.464793",
+    "updated_at": "2026-02-13T12:38:54.221014",
     "messages": [
       {
         "role": "user",
@@ -1437,6 +1437,16 @@
         "role": "assistant",
         "content": "I don't have information about your favorite sport.",
         "timestamp": "2026-02-12T20:15:16.824779"
+      },
+      {
+        "role": "user",
+        "content": "what is your name",
+        "timestamp": "2026-02-13T12:39:00.120699"
+      },
+      {
+        "role": "assistant",
+        "content": "My name is Mnemos, and I was created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T12:39:00.120699"
       }
     ]
   }
