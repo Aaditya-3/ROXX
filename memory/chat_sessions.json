@@ -1426,7 +1426,7 @@
     "user_id": "aaditya_03",
     "title": "New Chat",
     "created_at": "2026-02-12T20:15:07.430745",
-    "updated_at": "2026-02-13T12:38:54.221014",
+    "updated_at": "2026-02-13T13:04:36.339472",
     "messages": [
       {
         "role": "user",
@@ -1447,6 +1447,166 @@
         "role": "assistant",
         "content": "My name is Mnemos, and I was created by Aaditya Kothari.",
         "timestamp": "2026-02-13T12:39:00.120699"
+      },
+      {
+        "role": "user",
+        "content": "whats your name ?",
+        "timestamp": "2026-02-13T12:50:31.614500"
+      },
+      {
+        "role": "assistant",
+        "content": "My name is Mnemos, and I was created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T12:50:31.614500"
+      },
+      {
+        "role": "user",
+        "content": "who is ur creator",
+        "timestamp": "2026-02-13T12:50:59.186201"
+      },
+      {
+        "role": "assistant",
+        "content": "My creator is Aaditya Kothari.",
+        "timestamp": "2026-02-13T12:50:59.186201"
+      },
+      {
+        "role": "user",
+        "content": "what is ur name",
+        "timestamp": "2026-02-13T12:52:43.339778"
+      },
+      {
+        "role": "assistant",
+        "content": "My name is Mnemos, and I was created by Aaditya Kothari. I'm here to assist you with any questions or topics you'd like to discuss.",
+        "timestamp": "2026-02-13T12:52:43.339778"
+      },
+      {
+        "role": "user",
+        "content": "My name is Mnemos, and I was created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T13:00:53.422002"
+      },
+      {
+        "role": "assistant",
+        "content": "You've already shared your identity information with me. I have that stored in our conversation history.",
+        "timestamp": "2026-02-13T13:00:53.422002"
+      },
+      {
+        "role": "user",
+        "content": "what is my mnemos",
+        "timestamp": "2026-02-13T13:01:27.019726"
+      },
+      {
+        "role": "assistant",
+        "content": "You've asked about me, Mnemos. I'm an assistant created by Aaditya Kothari, and I'm here to help you with any questions or topics you'd like to discuss.",
+        "timestamp": "2026-02-13T13:01:27.019726"
+      },
+      {
+        "role": "user",
+        "content": "what is my name",
+        "timestamp": "2026-02-13T13:01:38.697495"
+      },
+      {
+        "role": "assistant",
+        "content": "My name is Mnemos, and I was created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T13:01:38.697495"
+      },
+      {
+        "role": "user",
+        "content": "what is my name",
+        "timestamp": "2026-02-13T13:01:47.011856"
+      },
+      {
+        "role": "assistant",
+        "content": "I've got that stored in our conversation history. You've already shared your identity information with me, and I'm happy to confirm it. My name is indeed Mnemos, and I was created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T13:01:47.011856"
+      },
+      {
+        "role": "user",
+        "content": "i am asking about my name not yours",
+        "timestamp": "2026-02-13T13:02:09.599715"
+      },
+      {
+        "role": "assistant",
+        "content": "that you're asking about your name, not mine. I've got that stored in our conversation history. You've already shared your identity information with me, and I'm happy to confirm it. Your name is indeed Mnemos, and you were created by Aaditya Kothari.",
+        "timestamp": "2026-02-13T13:02:09.599715"
+      },
+      {
+        "role": "user",
+        "content": "what do i prefer in girls ?",
+        "timestamp": "2026-02-13T13:02:43.928276"
+      },
+      {
+        "role": "assistant",
+        "content": "I don't have direct personal evidence about your preferences in girls. However, I do recall that you mentioned you like boobs in a girl.",
+        "timestamp": "2026-02-13T13:02:43.928276"
+      },
+      {
+        "role": "user",
+        "content": "my fav food ?",
+        "timestamp": "2026-02-13T13:02:56.773387"
+      },
+      {
+        "role": "assistant",
+        "content": "Your favorite food is pizza.",
+        "timestamp": "2026-02-13T13:02:56.773387"
+      },
+      {
+        "role": "user",
+        "content": "my fav drink ?",
+        "timestamp": "2026-02-13T13:03:08.405857"
+      },
+      {
+        "role": "assistant",
+        "content": "I can confirm that your favorite drink is Coca Cola.",
+        "timestamp": "2026-02-13T13:03:08.405857"
+      },
+      {
+        "role": "user",
+        "content": "my fav sport ?",
+        "timestamp": "2026-02-13T13:03:25.840498"
+      },
+      {
+        "role": "assistant",
+        "content": "I don't have information about your favorite sport.",
+        "timestamp": "2026-02-13T13:03:25.840498"
+      },
+      {
+        "role": "user",
+        "content": "i love basketball",
+        "timestamp": "2026-02-13T13:03:32.922010"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm glad to hear that you love basketball. However, I don't have any information about your preferences in sports. You previously mentioned that you like boobs in a girl, but I don't have any information about your favorite sport. Would you like to discuss basketball or something else?",
+        "timestamp": "2026-02-13T13:03:32.922010"
+      },
+      {
+        "role": "user",
+        "content": "what is my fav port",
+        "timestamp": "2026-02-13T13:03:54.141025"
+      },
+      {
+        "role": "assistant",
+        "content": "I don't have information about your favorite port. However, I recall that you mentioned you like boobs in a girl. If you'd like to discuss something else, feel free to ask.",
+        "timestamp": "2026-02-13T13:03:54.141025"
+      },
+      {
+        "role": "user",
+        "content": "what is my fav sport",
+        "timestamp": "2026-02-13T13:04:04.881209"
+      },
+      {
+        "role": "assistant",
+        "content": "I don't have information about your favorite sport. However, you previously mentioned that you like boobs in a girl. If you'd like to discuss basketball or something else, feel free to ask.",
+        "timestamp": "2026-02-13T13:04:04.881209"
+      },
+      {
+        "role": "user",
+        "content": "u need some work to be done",
+        "timestamp": "2026-02-13T13:04:38.769743"
+      },
+      {
+        "role": "assistant",
+        "content": "I've taken note of your message. However, I don't have any specific information about the work you need help with. Could you please provide more context or clarify what you'd like assistance with?",
+        "timestamp": "2026-02-13T13:04:38.769743"
       }
     ]
   }

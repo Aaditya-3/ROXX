@@ -445,9 +445,6 @@ function App() {
                                         <div className={`text-xs mt-1 ${currentChatId === chat.id ? "text-[#393E46]" : "text-[#948979]"}`}>
                                             Created: {formatDateTime(chat.created_at)}
                                         </div>
-                                        <div className={`text-xs ${currentChatId === chat.id ? "text-[#393E46]" : "text-[#948979]"}`}>
-                                            Updated: {formatDateTime(chat.updated_at)}
-                                        </div>
                                     </div>
                                     <button
                                         onClick={(e) => {
@@ -515,39 +512,39 @@ function App() {
                                                     M
                                                 </div>
                                             )}
-                                            <div
-                                                className={`rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
-                                                    isUser
-                                                        ? "bg-[#F0ECE5] text-[#161A30]"
-                                                        : "bg-[#31304D] text-[#F0ECE5] border border-[#948979]/35"
-                                                }`}
-                                            >
-                                                <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
+                                            <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+                                                <div
+                                                    className={`rounded-2xl px-5 py-3 shadow transition-all duration-200 ${
+                                                        isUser
+                                                            ? "bg-[#F0ECE5] text-[#161A30]"
+                                                            : "bg-[#31304D] text-[#F0ECE5] border border-[#948979]/35"
+                                                    }`}
+                                                >
+                                                    <div className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    aria-label="Copy message"
+                                                    onClick={() => copyMessageToClipboard(msg.content, messageKey)}
+                                                    className="mt-1 inline-flex h-8 w-8 items-center justify-center text-[#948979] opacity-0 transition-all duration-200 delay-0 group-hover:opacity-100 group-hover:delay-150 hover:text-[#F0ECE5] focus:opacity-100 focus:delay-0 focus:outline-none"
+                                                >
+                                                    {isCopied ? (
+                                                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
+                                                        </svg>
+                                                    ) : (
+                                                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                                                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                                        </svg>
+                                                    )}
+                                                </button>
                                             </div>
                                             {isUser && (
                                                 <div className="h-8 w-8 shrink-0 rounded-full border border-[#948979]/45 bg-[#393E46] text-[#F0ECE5] text-sm font-semibold flex items-center justify-center">
                                                     {userInitial}
                                                 </div>
                                             )}
-                                        </div>
-                                        <div className={`mt-1 flex ${isUser ? "justify-end" : "justify-start"}`}>
-                                            <button
-                                                type="button"
-                                                aria-label="Copy message"
-                                                onClick={() => copyMessageToClipboard(msg.content, messageKey)}
-                                                className="inline-flex h-8 w-8 items-center justify-center text-[#948979] opacity-0 transition-all duration-200 delay-0 group-hover:opacity-100 group-hover:delay-150 hover:text-[#F0ECE5] focus:opacity-100 focus:delay-0 focus:outline-none"
-                                            >
-                                                {isCopied ? (
-                                                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M20 6L9 17l-5-5" />
-                                                    </svg>
-                                                ) : (
-                                                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                                    </svg>
-                                                )}
-                                            </button>
                                         </div>
                                     </div>
                                 </div>
