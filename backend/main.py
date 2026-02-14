@@ -55,10 +55,12 @@ from backend.app.services.token_usage import estimate_tokens, estimate_cost_usd
 from backend.app.services.tool_router import run_agent_turn
 from backend.app.tasks.memory_tasks import enqueue_ingest_message, run_compression, run_decay, run_reembedding
 from backend.app.security.jwt_rotation import issue_access_token, issue_refresh_token, rotate_tokens
+from backend.app.brain.service import get_brain_service
 
 project_root = _project_root
 settings = get_settings()
 setup_logging()
+brain_service = get_brain_service(project_root)
 api_key_loaded = bool(os.getenv("GROQ_API_KEY"))
 realtime_web_enabled = os.getenv("ENABLE_REALTIME_WEB", "true").strip().lower() in {"1", "true", "yes", "on"}
 mongo_enabled = os.getenv("ENABLE_MONGO", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -1171,47 +1173,81 @@ async def chat(
         resolved_user_message = _resolve_short_reply_context(user_message, chat_session)
         continuity_message = _augment_query_for_continuity(resolved_user_message, chat_session)
         is_ack_reply = _is_short_acknowledgement(user_message)
+        brain_decision = brain_service.process(
+            user_id=user_id,
+            message=continuity_message,
+            chat_session=chat_session,
+        )
 
         # --------------------------------------------------------------
         # A. Handle explicit category-profile queries (top 3)
         # --------------------------------------------------------------
-        category_query = None if is_ack_reply else detect_category_query(continuity_message)
+        category_query = None if (is_ack_reply or brain_decision.direct_response) else detect_category_query(continuity_message)
         category_hint = build_category_top3_reply(user_id, category_query) if category_query else None
 
         # --------------------------------------------------------------
         # A2. Deterministic realtime answer for date/time style queries
         # --------------------------------------------------------------
-        builtin_realtime_hint = None if is_ack_reply else handle_builtin_realtime_query(continuity_message)
+        builtin_realtime_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_builtin_realtime_query(continuity_message)
 
         # --------------------------------------------------------------
         # A2b. Deterministic schedule answer (tests/classes + day)
         # --------------------------------------------------------------
-        schedule_hint = None if is_ack_reply else handle_schedule_query(continuity_message, user_id)
+        schedule_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_schedule_query(continuity_message, user_id)
 
         # --------------------------------------------------------------
         # A3. Deterministic preference reasoning (domain-agnostic)
         # --------------------------------------------------------------
-        preference_hint = None if is_ack_reply else handle_preference_query(continuity_message, user_id)
+        preference_hint = None if (is_ack_reply or brain_decision.direct_response) else handle_preference_query(continuity_message, user_id)
 
-        deterministic_hints = [h for h in [category_hint, builtin_realtime_hint, schedule_hint, preference_hint] if h]
-        orchestrator_payload = OrchestratorInput(
-            user_id=user_id,
-            chat_id=chat_id,
-            user_message=user_message,
-            continuity_message=continuity_message,
-            use_tools=bool(request.use_tools and settings.enable_tools),
-            scope=request.scope,
-        )
-        pipeline_result = orchestrator.run(
-            payload=orchestrator_payload,
-            chat_session=chat_session,
-            deterministic_hints=deterministic_hints,
-        )
-        reply = pipeline_result.reply
-        usage = pipeline_result.usage
-        semantic_rows = pipeline_result.semantic_rows
-        tool_events = pipeline_result.tool_events
-        usage["tool_events"] = tool_events
+        deterministic_hints = [
+            h
+            for h in (
+                list(brain_decision.deterministic_hints)
+                + [category_hint, builtin_realtime_hint, schedule_hint, preference_hint]
+            )
+            if h
+        ]
+
+        if brain_decision.direct_response:
+            reply = sanitize_response(continuity_message, brain_decision.direct_response)
+            input_tokens = estimate_tokens(continuity_message)
+            output_tokens = estimate_tokens(reply)
+            usage = {
+                "input_tokens_est": input_tokens,
+                "output_tokens_est": output_tokens,
+                "cost_est_usd": estimate_cost_usd(input_tokens, output_tokens),
+                "llm_latency_ms": 0.0,
+                "path": "brain_direct",
+                "intent": brain_decision.intent.value,
+            }
+            semantic_rows = []
+            tool_events = []
+            metrics.inc("llm_tokens_input_total", input_tokens)
+            metrics.inc("llm_tokens_output_total", output_tokens)
+            metrics.inc("llm_cost_usd_total", usage["cost_est_usd"])
+            usage["tool_events"] = tool_events
+        else:
+            orchestrator_payload = OrchestratorInput(
+                user_id=user_id,
+                chat_id=chat_id,
+                user_message=user_message,
+                continuity_message=continuity_message,
+                use_tools=bool(request.use_tools and settings.enable_tools),
+                scope=request.scope,
+                response_style=brain_decision.response_style,
+            )
+            pipeline_result = orchestrator.run(
+                payload=orchestrator_payload,
+                chat_session=chat_session,
+                deterministic_hints=deterministic_hints,
+            )
+            reply = pipeline_result.reply
+            usage = pipeline_result.usage
+            semantic_rows = pipeline_result.semantic_rows
+            tool_events = pipeline_result.tool_events
+            usage["tool_events"] = tool_events
+            usage["intent"] = brain_decision.intent.value
 
         # --------------------------------------------------------------
         # E. AFTER response is generated, extract any new memory
@@ -1417,6 +1453,14 @@ async def get_memories(x_user_id: str = Header(..., alias="X-User-ID")):
             for m in memories
         ]
     }
+
+
+@app.get("/memories/structured")
+async def get_structured_memories(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        return JSONResponse(status_code=400, content={"error": "X-User-ID header is required"})
+    return brain_service.store.export_user_context(user_id)
 
 
 @app.get("/memories/semantic")

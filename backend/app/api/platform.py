@@ -16,6 +16,12 @@ router = APIRouter(prefix="/api/v1/platform", tags=["platform"])
 @router.get("/architecture")
 async def architecture():
     diagram = """User Input
+-> Intent Classifier
+-> Brain Layer
+   - structured memory extraction/update
+   - temporal normalization (relative -> absolute date)
+   - logic reasoning layer (derived event status)
+   - response style control
 -> Context Builder
    - deterministic memory
    - semantic retrieval
@@ -38,6 +44,8 @@ async def platform_config():
         "semantic_enabled": settings.enable_semantic_memory,
         "streaming_enabled": settings.enable_streaming,
         "tools_enabled": settings.enable_tools,
+        "brain_layer_enabled": True,
+        "structured_memory_store": "memory/structured_memory.json",
         "ranking_weights": {
             "similarity": cfg.ranking_weights.similarity,
             "importance": cfg.ranking_weights.importance,
@@ -46,4 +54,3 @@ async def platform_config():
         "llm_timeout_seconds": cfg.llm_timeout_seconds,
         "max_tool_calls": cfg.max_tool_calls,
     }
-

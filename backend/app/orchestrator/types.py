@@ -16,6 +16,7 @@ class OrchestratorInput:
     continuity_message: str
     use_tools: bool = False
     scope: Optional[str] = None
+    response_style: str = ""
 
 
 @dataclass
@@ -53,4 +54,3 @@ class OrchestratorDependencies:
     should_realtime_fn: Callable[[str], bool]
     tool_agent_fn: Callable[[str], dict[str, Any]]
     sanitize_reply_fn: Callable[[str, str], str]
-

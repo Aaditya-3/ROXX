@@ -14,3 +14,4 @@ redis==5.2.1
 slowapi==0.1.9
 openai==1.61.1
 sentence-transformers==3.4.1
+dateparser==1.2.0
