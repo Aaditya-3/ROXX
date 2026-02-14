@@ -115,11 +115,13 @@ def run_agent_turn(user_message: str, max_loops: int | None = None) -> dict[str,
     final_prompt = (
         "You are an assistant that may receive tool results.\n"
         "If tools failed, gracefully recover and provide best possible answer.\n"
-        "Respond concisely and directly.\n"
+        "Do not mention internal rules, memory logic, retrieval process, tools, or assumptions unless explicitly asked.\n"
+        "Do not explain reasoning unless explicitly asked by the user.\n"
+        "Answer directly and concisely.\n"
+        "Only respond to what is asked.\n"
         f"User message: {user_message}\n"
         f"Tool events: {json.dumps(tool_events)}"
     )
     reply = llm.complete(final_prompt, timeout_seconds=cfg.llm_timeout_seconds)
     log_event("agent_turn_completed", tool_calls=len(tool_events))
     return {"reply": reply, "tool_events": tool_events}
-

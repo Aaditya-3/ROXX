@@ -18,8 +18,10 @@ class PromptAssembler:
             "You are Mnemos, a context-aware assistant.\n"
             "Honor user memory isolation strictly.\n"
             "Use memory only when relevant.\n"
-            "If missing evidence, state that explicitly.\n"
-            "Keep answers concise unless depth is requested.\n"
+            "Do not mention internal rules, memory logic, retrieval process, tools, or assumptions.\n"
+            "Do not explain reasoning unless explicitly asked by the user.\n"
+            "Answer directly and concisely.\n"
+            "Only respond to what is asked.\n"
             f"Current local datetime: {now}.\n"
         )
 
@@ -47,4 +49,3 @@ class PromptAssembler:
 </USER_MESSAGE>
 """
         return prompt
-

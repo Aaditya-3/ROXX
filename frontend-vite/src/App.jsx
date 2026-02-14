@@ -25,16 +25,84 @@ function parseSseBlock(block) {
 }
 
 export default function App() {
+  const CHAR_DELAY_MS = 18;
   const [userId, setUserId] = useState(localStorage.getItem("user_id") || "demo");
   const [text, setText] = useState("");
   const [messages, setMessages] = useState([]);
   const [semantic, setSemantic] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const endRef = useRef(null);
+  const typingQueueRef = useRef("");
+  const typingTimerRef = useRef(null);
+  const typingDoneRef = useRef(false);
+  const typingMessageIdRef = useRef("");
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) {
+        clearInterval(typingTimerRef.current);
+      }
+    };
+  }, []);
+
+  const clearTypingTimer = () => {
+    if (typingTimerRef.current) {
+      clearInterval(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+  };
+
+  const pumpTyping = () => {
+    if (typingTimerRef.current) return;
+    typingTimerRef.current = setInterval(() => {
+      const messageId = typingMessageIdRef.current;
+      if (!messageId) {
+        clearTypingTimer();
+        return;
+      }
+      if (!typingQueueRef.current.length) {
+        if (typingDoneRef.current) clearTypingTimer();
+        else clearTypingTimer();
+        return;
+      }
+      const nextChar = typingQueueRef.current.slice(0, 1);
+      typingQueueRef.current = typingQueueRef.current.slice(1);
+      setWaiting(false);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, content: `${m.content || ""}${nextChar}` } : m))
+      );
+    }, CHAR_DELAY_MS);
+  };
+
+  const startTyping = (messageId) => {
+    typingMessageIdRef.current = messageId;
+    typingQueueRef.current = "";
+    typingDoneRef.current = false;
+    clearTypingTimer();
+  };
+
+  const queueTyping = (messageId, textChunk) => {
+    if (!textChunk) return;
+    if (typingMessageIdRef.current !== messageId) typingMessageIdRef.current = messageId;
+    typingQueueRef.current += textChunk;
+    pumpTyping();
+  };
+
+  const finishTyping = () => {
+    typingDoneRef.current = true;
+    pumpTyping();
+  };
+
+  const waitTypingDrain = async () => {
+    while (typingQueueRef.current.length > 0 || typingTimerRef.current) {
+      await new Promise((resolve) => setTimeout(resolve, CHAR_DELAY_MS));
+    }
+  };
 
   const headers = (json = false) => {
     const h = { "X-User-ID": userId };
@@ -53,12 +121,14 @@ export default function App() {
     const msg = text.trim();
     setText("");
     setLoading(true);
+    setWaiting(true);
     const assistantId = `a-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       { role: "user", content: msg },
       { id: assistantId, role: "assistant", content: "" }
     ]);
+    startTyping(assistantId);
     try {
       const r = await fetch(API_STREAM_URL, {
         method: "POST",
@@ -84,28 +154,32 @@ export default function App() {
           if (!evt) continue;
           if (evt.event === "tool_call") {
             const toolName = evt.payload?.tool_call?.name || evt.payload?.tool || "tool";
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantId ? { ...m, content: `${m.content}\n[tool:${toolName}] ${JSON.stringify(evt.payload)}` } : m
-              )
-            );
+            queueTyping(assistantId, `\n[tool:${toolName}] ${JSON.stringify(evt.payload)}`);
           } else if (evt.event === "token") {
             const token = evt.payload?.text || "";
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: `${m.content}${token}` } : m))
-            );
+            queueTyping(assistantId, token);
+          } else if (evt.event === "done") {
+            finishTyping();
           } else if (evt.event === "error") {
             throw new Error(evt.payload?.message || "Stream error");
           }
         }
       }
+      finishTyping();
+      await waitTypingDrain();
       await loadSemantic();
     } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? { ...m, content: `Error: ${err.message}` } : m))
-      );
+      startTyping(assistantId);
+      queueTyping(assistantId, `Error: ${err.message}`);
+      finishTyping();
+      await waitTypingDrain();
     } finally {
       setLoading(false);
+      setWaiting(false);
+      clearTypingTimer();
+      typingQueueRef.current = "";
+      typingDoneRef.current = false;
+      typingMessageIdRef.current = "";
     }
   };
 
@@ -126,11 +200,25 @@ export default function App() {
           </div>
           <div className="h-[60vh] overflow-y-auto space-y-3 pr-1">
             {messages.map((m, i) => (
-              <div key={m.id || i} className={`rounded-xl px-3 py-2 ${m.role === "user" ? "bg-blue-700/30" : "bg-slate-800"}`}>
-                <div className="text-xs text-slate-400 mb-1">{m.role}</div>
-                <div className="whitespace-pre-wrap">{m.content}</div>
-              </div>
+              m.role !== "user" &&
+              !m.content &&
+              waiting &&
+              m.id === typingMessageIdRef.current ? null : (
+                <div key={m.id || i} className={`rounded-xl px-3 py-2 ${m.role === "user" ? "bg-blue-700/30" : "bg-slate-800"}`}>
+                  <div className="text-xs text-slate-400 mb-1">{m.role}</div>
+                  <div className="whitespace-pre-wrap">{m.content}</div>
+                </div>
+              )
             ))}
+            {waiting && (
+              <div className="rounded-xl px-3 py-2 bg-slate-800 inline-flex items-center gap-2">
+                <span className="typing-dots" aria-label="Assistant is thinking">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </span>
+              </div>
+            )}
             <div ref={endRef} />
           </div>
           <div className="mt-3 flex gap-2">

@@ -105,6 +105,19 @@ def sanitize_response(user_message: str, reply: str) -> str:
                 text = text[len(prefix):].lstrip()
                 lower = text.lower()
 
+    # Remove common meta-reasoning lead-ins that expose internal logic.
+    meta_prefix_patterns = [
+        r"^(based on|according to|from)\s+(the\s+)?(memory|context|rules|instructions|assumptions?)\b[\s,:-]*",
+        r"^i\s+(assume|inferred?|reasoned?|used|considered)\b[\s,:-]*",
+        r"^internally\b[\s,:-]*",
+    ]
+    original = text
+    for pattern in meta_prefix_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    text = text.strip()
+    if not text:
+        text = original.strip()
+
     return text
 
 

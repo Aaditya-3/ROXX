@@ -117,7 +117,18 @@ function TypewriterText({ text, speed = 18, active = true }) {
     );
 }
 
+function BouncingDots() {
+    return (
+        <span className="typing-dots" aria-label="Assistant is thinking">
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+            <span className="typing-dot" />
+        </span>
+    );
+}
+
 function App() {
+    const ASSISTANT_CHAR_DELAY_MS = 18;
     const [userId, setUserId] = useState(localStorage.getItem(USER_ID_KEY) || "");
     const [authMode, setAuthMode] = useState("login");
     const [authError, setAuthError] = useState("");
@@ -139,6 +150,10 @@ function App() {
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
     const copyResetTimerRef = useRef(null);
+    const assistantTypingQueueRef = useRef("");
+    const assistantTypingTimerRef = useRef(null);
+    const assistantTypingDoneRef = useRef(false);
+    const assistantTypingMessageIdRef = useRef("");
 
     const formatDateTime = (iso) => {
         try {
@@ -199,8 +214,82 @@ function App() {
             if (copyResetTimerRef.current) {
                 clearTimeout(copyResetTimerRef.current);
             }
+            if (assistantTypingTimerRef.current) {
+                clearInterval(assistantTypingTimerRef.current);
+                assistantTypingTimerRef.current = null;
+            }
+            assistantTypingQueueRef.current = "";
+            assistantTypingDoneRef.current = false;
+            assistantTypingMessageIdRef.current = "";
         };
     }, []);
+
+    const clearAssistantTypingTimer = () => {
+        if (assistantTypingTimerRef.current) {
+            clearInterval(assistantTypingTimerRef.current);
+            assistantTypingTimerRef.current = null;
+        }
+    };
+
+    const pumpAssistantTyping = () => {
+        if (assistantTypingTimerRef.current) return;
+        assistantTypingTimerRef.current = setInterval(() => {
+            const messageId = assistantTypingMessageIdRef.current;
+            if (!messageId) {
+                clearAssistantTypingTimer();
+                return;
+            }
+
+            if (!assistantTypingQueueRef.current.length) {
+                if (assistantTypingDoneRef.current) {
+                    clearAssistantTypingTimer();
+                    setIsStreaming(false);
+                } else {
+                    clearAssistantTypingTimer();
+                }
+                return;
+            }
+
+            const nextChar = assistantTypingQueueRef.current.slice(0, 1);
+            assistantTypingQueueRef.current = assistantTypingQueueRef.current.slice(1);
+            setIsWaitingResponse(false);
+            setMessages((prev) =>
+                prev.map((m) =>
+                    m.id === messageId
+                        ? { ...m, content: `${m.content || ""}${nextChar}` }
+                        : m
+                )
+            );
+        }, ASSISTANT_CHAR_DELAY_MS);
+    };
+
+    const startAssistantTyping = (messageId) => {
+        assistantTypingMessageIdRef.current = messageId;
+        assistantTypingQueueRef.current = "";
+        assistantTypingDoneRef.current = false;
+        clearAssistantTypingTimer();
+        setIsStreaming(true);
+    };
+
+    const queueAssistantText = (messageId, textChunk) => {
+        if (!textChunk) return;
+        if (assistantTypingMessageIdRef.current !== messageId) {
+            assistantTypingMessageIdRef.current = messageId;
+        }
+        assistantTypingQueueRef.current += textChunk;
+        pumpAssistantTyping();
+    };
+
+    const finishAssistantTyping = () => {
+        assistantTypingDoneRef.current = true;
+        pumpAssistantTyping();
+    };
+
+    const waitForAssistantTypingDrain = async () => {
+        while (assistantTypingQueueRef.current.length > 0 || assistantTypingTimerRef.current) {
+            await new Promise((resolve) => setTimeout(resolve, ASSISTANT_CHAR_DELAY_MS));
+        }
+    };
 
     const getHeaders = (withJson = false, includeUser = false) => {
         const headers = {};
@@ -352,27 +441,10 @@ function App() {
                 { id: targetId, role: "assistant", content: "", timestamp: new Date().toISOString() }
             ]);
         }
-        setIsStreaming(true);
-
-        return new Promise((resolve) => {
-            let i = 0;
-            let rafId = 0;
-            const tick = () => {
-                const step = Math.max(2, Math.ceil(fullText.length / 180));
-                i = Math.min(fullText.length, i + step);
-                const partial = fullText.slice(0, i);
-                setMessages((prev) =>
-                    prev.map((m) => (m.id === targetId ? { ...m, content: partial } : m))
-                );
-                if (i < fullText.length) {
-                    rafId = requestAnimationFrame(tick);
-                } else {
-                    setIsStreaming(false);
-                    resolve();
-                }
-            };
-            rafId = requestAnimationFrame(tick);
-        });
+        startAssistantTyping(targetId);
+        queueAssistantText(targetId, fullText || "");
+        finishAssistantTyping();
+        return waitForAssistantTypingDrain();
     };
 
     const parseSSEBlock = (block) => {
@@ -413,6 +485,7 @@ function App() {
             { role: "user", content: userMessage, timestamp: new Date().toISOString() },
             { id: assistantMessageId, role: "assistant", content: "", timestamp: new Date().toISOString() }
         ]);
+        startAssistantTyping(assistantMessageId);
 
         try {
             const response = await fetch(API_STREAM_URL, {
@@ -430,8 +503,6 @@ function App() {
                 await streamAssistantReply(data.reply || "", assistantMessageId);
                 if (data.chat_id && data.chat_id !== currentChatId) setCurrentChatId(data.chat_id);
             } else {
-                setIsWaitingResponse(false);
-                setIsStreaming(true);
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = "";
@@ -453,42 +524,41 @@ function App() {
                             }
                         } else if (evt.event === "tool_call") {
                             const toolName = evt.data?.tool_call?.name || evt.data?.tool || "tool";
-                            setMessages((prev) =>
-                                prev.map((m) =>
-                                    m.id === assistantMessageId
-                                        ? {
-                                              ...m,
-                                              content: `${m.content || ""}\n[tool:${toolName}] ${JSON.stringify(evt.data)}`,
-                                          }
-                                        : m
-                                )
+                            queueAssistantText(
+                                assistantMessageId,
+                                `\n[tool:${toolName}] ${JSON.stringify(evt.data)}`
                             );
                         } else if (evt.event === "token") {
                             const token = evt.data?.text || "";
                             if (!token) continue;
-                            setMessages((prev) =>
-                                prev.map((m) =>
-                                    m.id === assistantMessageId ? { ...m, content: `${m.content || ""}${token}` } : m
-                                )
-                            );
+                            queueAssistantText(assistantMessageId, token);
                         } else if (evt.event === "done") {
-                            setIsStreaming(false);
+                            finishAssistantTyping();
                         } else if (evt.event === "error") {
                             throw new Error(evt.data?.message || "Streaming failed");
                         }
                     }
                 }
+                finishAssistantTyping();
+                await waitForAssistantTypingDrain();
             }
             await loadChats();
             if (semanticPanelOpen) await loadSemanticMemories();
         } catch (error) {
             console.error("Error sending message:", error);
             setIsWaitingResponse(false);
-            await streamAssistantReply(`Error: ${error.message}`, assistantMessageId);
+            startAssistantTyping(assistantMessageId);
+            queueAssistantText(assistantMessageId, `Error: ${error.message}`);
+            finishAssistantTyping();
+            await waitForAssistantTypingDrain();
         } finally {
             setIsLoading(false);
             setIsWaitingResponse(false);
             setIsStreaming(false);
+            clearAssistantTypingTimer();
+            assistantTypingQueueRef.current = "";
+            assistantTypingDoneRef.current = false;
+            assistantTypingMessageIdRef.current = "";
         }
     };
 
@@ -635,6 +705,12 @@ function App() {
                                 const messageKey = msg.id || `${msg.role}-${idx}`;
                                 const isCopied = copiedMessageKey === messageKey;
                                 const isUser = msg.role === "user";
+                                const isPendingAssistant =
+                                    !isUser &&
+                                    !msg.content &&
+                                    isWaitingResponse &&
+                                    msg.id === assistantTypingMessageIdRef.current;
+                                if (isPendingAssistant) return null;
                                 return (
                                 <div key={messageKey} className={`flex fade-up ${isUser ? "justify-end" : "justify-start"}`}>
                                     <div className="group max-w-[85%]">
@@ -683,8 +759,8 @@ function App() {
                             )})}
                             {isWaitingResponse && (
                                 <div className="flex justify-start">
-                                    <div className="bg-[#31304D] border border-[#948979]/35 rounded-2xl px-4 py-2 text-[#948979] text-sm">
-                                        Thinking...
+                                    <div className="bg-[#31304D] border border-[#948979]/35 rounded-2xl px-4 py-3 text-[#948979] text-sm min-w-[70px] inline-flex items-center justify-center">
+                                        <BouncingDots />
                                     </div>
                                 </div>
                             )}

@@ -68,6 +68,40 @@
             animation: softPop 180ms ease-out;
         }
 
+        @keyframes typingDotBounce {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0.45;
+            }
+            30% {
+                transform: translateY(-5px);
+                opacity: 1;
+            }
+        }
+
+        .typing-dots {
+            display: inline-flex;
+            align-items: flex-end;
+            gap: 6px;
+            height: 12px;
+        }
+
+        .typing-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 9999px;
+            background: var(--text);
+            animation: typingDotBounce 0.9s ease-in-out infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.12s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.24s;
+        }
+
         /* Custom scrollbar */
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
@@ -86,6 +120,6 @@
 </head>
 <body class="bg-[#222831]">
     <div id="root"></div>
-    <script type="text/babel" src="app.jsx?v=20260213b"></script>
+    <script type="text/babel" src="app.jsx?v=20260214a"></script>
 </body>
 </html>
