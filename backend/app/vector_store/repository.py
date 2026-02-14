@@ -196,10 +196,12 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                 query_vector=vector,
                 query_filter=Filter(must=conditions),
                 limit=top_k,
+                with_vectors=True,
             )
             hits: list[VectorHit] = []
             for p in points:
                 payload = p.payload or {}
+                stored_vector = list(getattr(p, "vector", []) or [])
                 memory = SemanticMemory.from_dict(
                     {
                         "id": payload.get("memory_id") or str(p.id),
@@ -212,7 +214,7 @@ class QdrantVectorStoreRepository(VectorStoreRepository):
                         "decay_factor": payload.get("decay_factor", 0.01),
                         "tags": payload.get("tags", []),
                         "source_message_id": payload.get("source_message_id", ""),
-                        "embedding": vector,
+                        "embedding": stored_vector,
                         "embedding_model": payload.get("embedding_model", ""),
                         "embedding_provider": payload.get("embedding_provider", ""),
                         "created_at": payload.get("created_at"),
@@ -319,13 +321,16 @@ def get_vector_store() -> VectorStoreRepository:
         return _repo_cache
 
     repo: VectorStoreRepository
+    settings = get_settings()
     qdrant_repo = QdrantVectorStoreRepository()
     if qdrant_repo.client is not None:
         repo = qdrant_repo
         log_event("vector_store_ready", backend="qdrant", collection=qdrant_repo.collection)
+    elif settings.require_qdrant:
+        raise RuntimeError("Qdrant is required but unavailable. Check QDRANT_URL and QDRANT_API_KEY.")
     else:
         repo = LocalVectorStoreRepository()
-        log_event("vector_store_ready", backend="local_json", path=str(get_settings().semantic_store_path))
+        log_event("vector_store_ready", backend="local_json", path=str(settings.semantic_store_path))
 
     _repo_cache = repo
     return _repo_cache

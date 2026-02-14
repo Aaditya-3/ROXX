@@ -6,10 +6,13 @@ import os
 import json
 import hashlib
 import hmac
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+
+from backend.app.core.db.relational import DBUser, get_relational_session, init_relational_db
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -82,38 +85,72 @@ def _validate_payload(username: str, password: str):
         )
 
 
-# In-memory account store for this app session.
-_users: dict[str, str] = {}
-if APP_USERNAME and APP_PASSWORD:
-    _users[_normalize_username(APP_USERNAME)] = _hash_password(APP_PASSWORD)
 _project_root = Path(__file__).resolve().parents[4]
 _users_store_path = _project_root / "memory" / "users.json"
+init_relational_db()
 
 
-def _load_users():
+def _get_user_by_username(username: str) -> DBUser | None:
+    with get_relational_session() as db:
+        return db.query(DBUser).filter(DBUser.username == username).first()
+
+
+def _seed_env_user_if_needed():
+    if not (APP_USERNAME and APP_PASSWORD):
+        return
+    username = _normalize_username(APP_USERNAME)
+    if not username:
+        return
+    with get_relational_session() as db:
+        existing = db.query(DBUser).filter(DBUser.username == username).first()
+        if existing:
+            return
+        db.add(
+            DBUser(
+                id=str(uuid.uuid4()),
+                username=username,
+                email=None,
+                password_hash=_hash_password(APP_PASSWORD),
+                name=username,
+                plan_type="free",
+                is_active=True,
+            )
+        )
+
+
+def _migrate_legacy_users_json():
     if not _users_store_path.exists():
         return
     try:
         with open(_users_store_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict):
+        if not isinstance(data, dict):
+            return
+        with get_relational_session() as db:
             for username, password_hash in data.items():
-                if isinstance(username, str) and isinstance(password_hash, str):
-                    _users[_normalize_username(username)] = password_hash
+                uname = _normalize_username(str(username))
+                if not uname or not isinstance(password_hash, str):
+                    continue
+                existing = db.query(DBUser).filter(DBUser.username == uname).first()
+                if existing:
+                    continue
+                db.add(
+                    DBUser(
+                        id=str(uuid.uuid4()),
+                        username=uname,
+                        email=None,
+                        password_hash=password_hash,
+                        name=uname,
+                        plan_type="free",
+                        is_active=True,
+                    )
+                )
     except Exception:
-        pass
+        return
 
 
-def _save_users():
-    try:
-        _users_store_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(_users_store_path, "w", encoding="utf-8") as f:
-            json.dump(_users, f, indent=2)
-    except Exception:
-        pass
-
-
-_load_users()
+_seed_env_user_if_needed()
+_migrate_legacy_users_json()
 
 
 @router.post("/signup", response_model=SimpleLoginResponse)
@@ -122,15 +159,24 @@ async def signup(payload: SimpleSignupRequest):
     password = payload.password or ""
     _validate_payload(username, password)
 
-    if username in _users:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Username already exists",
+    with get_relational_session() as db:
+        existing = db.query(DBUser).filter(DBUser.username == username).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists",
+            )
+        user = DBUser(
+            id=str(uuid.uuid4()),
+            username=username,
+            email=None,
+            password_hash=_hash_password(password),
+            name=username,
+            plan_type="free",
+            is_active=True,
         )
-
-    _users[username] = _hash_password(password)
-    _save_users()
-    return SimpleLoginResponse(user_id=username)
+        db.add(user)
+        return SimpleLoginResponse(user_id=user.id)
 
 
 @router.post("/login", response_model=SimpleLoginResponse)
@@ -139,11 +185,11 @@ async def login(payload: SimpleLoginRequest):
     password = payload.password or ""
     _validate_payload(username, password)
 
-    stored_hash = _users.get(username)
-    if not stored_hash or not _verify_password(password, stored_hash):
+    user = _get_user_by_username(username)
+    if not user or not _verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
 
-    return SimpleLoginResponse(user_id=username)
+    return SimpleLoginResponse(user_id=user.id)

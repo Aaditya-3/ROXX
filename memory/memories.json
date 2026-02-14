@@ -112,14 +112,14 @@
     "type": "fact",
     "key": "core_identity.name",
     "value": "aaditya",
-    "confidence": 0.7,
+    "confidence": 0.7999999999999999,
     "metadata": {
       "domain": "identity",
       "category": "name",
       "scope": "PROFILE"
     },
     "created_at": "2026-02-10T19:09:48.571757",
-    "last_updated": "2026-02-14T17:11:14.978433"
+    "last_updated": "2026-02-14T22:27:49.634774"
   },
   {
     "id": "e6acc20a-6694-4955-a652-c62fc8b21ba3",

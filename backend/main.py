@@ -24,7 +24,7 @@ import re
 import time
 print("GROQ_API_KEY loaded:", bool(os.getenv("GROQ_API_KEY")))
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any, List, Optional
 from fastapi import FastAPI, HTTPException, Header, BackgroundTasks, Request
@@ -39,6 +39,15 @@ from memory.memory_retriever import retrieve_memories
 from memory.memory_store import get_memory_store
 from backend.app.core.tools.realtime_info import should_fetch_realtime, get_realtime_context
 from backend.app.core.db.mongo import get_db
+from backend.app.core.db.relational import (
+    DBChatMessage,
+    DBChatSession,
+    DBUsageLog,
+    DBUser,
+    DBUserSetting,
+    get_relational_session,
+    init_relational_db,
+)
 from backend.app.core.config import get_settings
 from backend.app.core.middleware import setup_middleware, validate_message_payload
 from backend.app.core.tools.preference_reasoning import (
@@ -59,6 +68,7 @@ from backend.app.brain.service import get_brain_service
 
 project_root = _project_root
 settings = get_settings()
+init_relational_db()
 setup_logging()
 brain_service = get_brain_service(project_root)
 api_key_loaded = bool(os.getenv("GROQ_API_KEY"))
@@ -257,13 +267,26 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"error": f"Internal error: {classification}"})
 
 
+def _parse_iso_datetime(raw: Any) -> datetime:
+    if isinstance(raw, datetime):
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return datetime.now(timezone.utc)
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
 class ChatSession:
     def __init__(self, user_id: str):
+        now = datetime.now(timezone.utc)
         self.id: str = str(uuid.uuid4())
         self.user_id: str = user_id
         self.title: str = "New Chat"
-        self.created_at: datetime = datetime.now()
-        self.updated_at: datetime = datetime.now()
+        self.created_at: datetime = now
+        self.updated_at: datetime = now
         self.messages: List[dict] = []
 
     def to_dict(self) -> dict:
@@ -278,12 +301,12 @@ class ChatSession:
 
     @classmethod
     def from_dict(cls, data: dict) -> "ChatSession":
-        session = cls(user_id=data.get("user_id", "guest"))
-        session.id = data["id"]
-        session.title = data.get("title", "New Chat")
-        session.created_at = datetime.fromisoformat(data["created_at"])
-        session.updated_at = datetime.fromisoformat(data["updated_at"])
-        session.messages = data.get("messages", [])
+        session = cls(user_id=str(data.get("user_id") or "guest"))
+        session.id = str(data.get("id") or str(uuid.uuid4()))
+        session.title = str(data.get("title") or "New Chat")
+        session.created_at = _parse_iso_datetime(data.get("created_at"))
+        session.updated_at = _parse_iso_datetime(data.get("updated_at"))
+        session.messages = [x for x in (data.get("messages") or []) if isinstance(x, dict)]
         return session
 
 
@@ -313,6 +336,47 @@ def _disable_chat_mongo(reason: str):
     chat_collection = None
 
 
+def _synthetic_username_for_user_id(user_id: str) -> str:
+    compact = re.sub(r"[^a-z0-9]+", "_", (user_id or "").lower()).strip("_")
+    if not compact:
+        compact = "user"
+    return f"u_{compact}"[:120]
+
+
+def _ensure_user_row(user_id: str, db=None):
+    uid = (user_id or "").strip()
+    if not uid:
+        return
+    if db is None:
+        with get_relational_session() as session:
+            _ensure_user_row(uid, db=session)
+        return
+
+    existing = db.query(DBUser).filter(DBUser.id == uid).first()
+    if existing:
+        return
+
+    candidate = _synthetic_username_for_user_id(uid)
+    unique_username = candidate
+    idx = 1
+    while db.query(DBUser.id).filter(DBUser.username == unique_username).first():
+        suffix = f"_{idx}"
+        unique_username = f"{candidate[: max(1, 120 - len(suffix))]}{suffix}"
+        idx += 1
+
+    db.add(
+        DBUser(
+            id=uid,
+            username=unique_username,
+            email=None,
+            password_hash="external_auth",
+            name=uid,
+            plan_type="free",
+            is_active=True,
+        )
+    )
+
+
 def _estimate_tokens(text: str) -> int:
     # Lightweight approximation for memory budgeting.
     return max(1, len((text or "").strip()) // 4)
@@ -326,24 +390,115 @@ def _chat_token_count(session: ChatSession) -> int:
 
 
 def _persist_chat_session(session: ChatSession):
-    if chat_collection is not None:
-        try:
-            payload = session.to_dict()
-            chat_collection.replace_one({"id": session.id}, payload, upsert=True)
-            return
-        except Exception as e:
-            _disable_chat_mongo(str(e))
-    save_chat_sessions()
+    with get_relational_session() as db:
+        _ensure_user_row(session.user_id, db=db)
+        row = db.query(DBChatSession).filter(DBChatSession.id == session.id).first()
+        if row is None:
+            row = DBChatSession(
+                id=session.id,
+                user_id=session.user_id,
+                title=session.title or "New Chat",
+                created_at=session.created_at,
+                updated_at=session.updated_at,
+            )
+            db.add(row)
+        else:
+            row.user_id = session.user_id
+            row.title = session.title or "New Chat"
+            row.created_at = session.created_at
+            row.updated_at = session.updated_at
+
+        db.query(DBChatMessage).filter(DBChatMessage.session_id == session.id).delete(synchronize_session=False)
+        for item in session.messages:
+            role = str(item.get("role") or "").strip().lower()
+            content = str(item.get("content") or "").strip()
+            if role not in {"user", "assistant"} or not content:
+                continue
+            ts = _parse_iso_datetime(item.get("timestamp"))
+            db.add(
+                DBChatMessage(
+                    session_id=session.id,
+                    user_id=session.user_id,
+                    role=role,
+                    content=content,
+                    timestamp=ts,
+                    token_count=_estimate_tokens(content),
+                )
+            )
 
 
 def _delete_chat_session_storage(chat_id: str):
-    if chat_collection is not None:
+    with get_relational_session() as db:
+        db.query(DBChatMessage).filter(DBChatMessage.session_id == chat_id).delete(synchronize_session=False)
+        db.query(DBChatSession).filter(DBChatSession.id == chat_id).delete(synchronize_session=False)
+
+
+def _load_chat_sessions_from_relational() -> int:
+    chat_sessions.clear()
+    with get_relational_session() as db:
+        session_rows = db.query(DBChatSession).order_by(DBChatSession.updated_at.desc()).all()
+        message_rows = db.query(DBChatMessage).order_by(DBChatMessage.timestamp.asc()).all()
+
+    grouped_messages: dict[str, list[dict[str, Any]]] = {}
+    for msg in message_rows:
+        grouped_messages.setdefault(msg.session_id, []).append(
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": (msg.timestamp or datetime.now(timezone.utc)).isoformat(),
+            }
+        )
+
+    for row in session_rows:
+        session = ChatSession(user_id=row.user_id)
+        session.id = row.id
+        session.title = row.title or "New Chat"
+        session.created_at = row.created_at or datetime.now(timezone.utc)
+        session.updated_at = row.updated_at or session.created_at
+        session.messages = grouped_messages.get(row.id, [])
+        chat_sessions[session.id] = session
+
+    return len(session_rows)
+
+
+def _load_legacy_chat_sessions_from_mongo() -> list[ChatSession]:
+    if chat_collection is None:
+        return []
+    try:
+        data = list(chat_collection.find({}, {"_id": 0}))
+    except Exception as exc:
+        _disable_chat_mongo(str(exc))
+        return []
+    out: list[ChatSession] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
         try:
-            chat_collection.delete_one({"id": chat_id})
-            return
-        except Exception as e:
-            _disable_chat_mongo(str(e))
-    save_chat_sessions()
+            out.append(ChatSession.from_dict(item))
+        except Exception:
+            continue
+    return out
+
+
+def _load_legacy_chat_sessions_from_json() -> list[ChatSession]:
+    if not chat_storage_path.exists():
+        return []
+    try:
+        with open(chat_storage_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[ChatSession] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        try:
+            out.append(ChatSession.from_dict(item))
+        except Exception:
+            continue
+    return out
 
 
 def _trim_chat_to_budget(session: ChatSession, token_budget: int):
@@ -802,52 +957,104 @@ def enforce_user_chat_token_budget(user_id: str):
     if user_sessions and total_tokens > MAX_USER_CHAT_TOKENS:
         remaining = user_sessions[0]
         _trim_chat_to_budget(remaining, MAX_USER_CHAT_TOKENS)
-        remaining.updated_at = datetime.now()
+        remaining.updated_at = datetime.now(timezone.utc)
         _persist_chat_session(remaining)
 
 
 def load_chat_sessions():
-    if chat_collection is not None:
-        try:
-            data = list(chat_collection.find({}, {"_id": 0}))
-            if data:
-                for item in data:
-                    session = ChatSession.from_dict(item)
-                    chat_sessions[session.id] = session
-                return
-        except Exception as e:
-            _disable_chat_mongo(str(e))
-    if not chat_storage_path.exists():
+    loaded = _load_chat_sessions_from_relational()
+    if loaded > 0:
         return
-    try:
-        with open(chat_storage_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, list):
-            for item in data:
-                session = ChatSession.from_dict(item)
-                chat_sessions[session.id] = session
-    except Exception as e:
-        print(f"Warning: failed to load chat sessions: {e}")
+
+    legacy = _load_legacy_chat_sessions_from_mongo()
+    if not legacy:
+        legacy = _load_legacy_chat_sessions_from_json()
+    if not legacy:
+        return
+
+    for session in legacy:
+        chat_sessions[session.id] = session
+        _persist_chat_session(session)
 
 
 def save_chat_sessions():
-    if chat_collection is not None:
-        try:
-            existing_ids = set(chat_sessions.keys())
-            for session in chat_sessions.values():
-                payload = session.to_dict()
-                chat_collection.replace_one({"id": session.id}, payload, upsert=True)
-            chat_collection.delete_many({"id": {"$nin": list(existing_ids)}})
-            return
-        except Exception as e:
-            _disable_chat_mongo(str(e))
+    for session in chat_sessions.values():
+        _persist_chat_session(session)
+
+
+def _load_chat_session_from_relational(chat_id: str) -> ChatSession | None:
+    cid = str(chat_id or "").strip()
+    if not cid:
+        return None
+    with get_relational_session() as db:
+        row = db.query(DBChatSession).filter(DBChatSession.id == cid).first()
+        if row is None:
+            return None
+        messages = (
+            db.query(DBChatMessage)
+            .filter(DBChatMessage.session_id == cid)
+            .order_by(DBChatMessage.timestamp.asc())
+            .all()
+        )
+    session = ChatSession(user_id=row.user_id)
+    session.id = row.id
+    session.title = row.title or "New Chat"
+    session.created_at = row.created_at or datetime.now(timezone.utc)
+    session.updated_at = row.updated_at or session.created_at
+    session.messages = [
+        {
+            "role": m.role,
+            "content": m.content,
+            "timestamp": (m.timestamp or datetime.now(timezone.utc)).isoformat(),
+        }
+        for m in messages
+        if m.role in {"user", "assistant"} and str(m.content or "").strip()
+    ]
+    return session
+
+
+def _record_usage_log(user_id: str, session_id: str | None, usage: dict[str, Any], model_used: str | None = None):
+    uid = (user_id or "").strip()
+    if not uid:
+        return
     try:
-        chat_storage_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [session.to_dict() for session in chat_sessions.values()]
-        with open(chat_storage_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-    except Exception as e:
-        print(f"Warning: failed to save chat sessions: {e}")
+        input_tokens = int(usage.get("input_tokens_est") or 0)
+        output_tokens = int(usage.get("output_tokens_est") or 0)
+        cost_usd = float(usage.get("cost_est_usd") or 0.0)
+        model_name = str(model_used or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"))
+
+        with get_relational_session() as db:
+            _ensure_user_row(uid, db=db)
+            db.add(
+                DBUsageLog(
+                    user_id=uid,
+                    session_id=(session_id or None),
+                    model_used=model_name,
+                    tokens_input=input_tokens,
+                    tokens_output=output_tokens,
+                    cost_usd=cost_usd,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+    except Exception as exc:
+        log_event("usage_log_write_failed", user_id=uid, error=str(exc))
+
+
+def _get_or_create_user_settings(user_id: str, db) -> DBUserSetting:
+    uid = (user_id or "").strip()
+    row = db.query(DBUserSetting).filter(DBUserSetting.user_id == uid).first()
+    if row is not None:
+        return row
+    _ensure_user_row(uid, db=db)
+    row = DBUserSetting(
+        user_id=uid,
+        tone_preference="balanced",
+        memory_enabled=True,
+        reasoning_mode="standard",
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    return row
 
 
 load_chat_sessions()
@@ -884,6 +1091,12 @@ class AgentChatResponse(BaseModel):
     reply: str
     tool_events: list[dict[str, Any]]
     usage: dict[str, Any]
+
+
+class UserSettingsUpdate(BaseModel):
+    tone_preference: Optional[str] = None
+    memory_enabled: Optional[bool] = None
+    reasoning_mode: Optional[str] = None
 
 
 def _deterministic_memory_context(query: str, user_id: str) -> str:
@@ -1156,7 +1369,15 @@ async def chat(
             print(f"Applied strong sentiment feedback to {adjusted_count} memory item(s)")
 
         chat_id = request.chat_id
-        if not chat_id or chat_id not in chat_sessions:
+        chat_session = None
+        if chat_id:
+            chat_session = chat_sessions.get(chat_id)
+            if chat_session is None:
+                chat_session = _load_chat_session_from_relational(chat_id)
+                if chat_session is not None:
+                    chat_sessions[chat_session.id] = chat_session
+
+        if chat_session is None:
             chat_session = ChatSession(user_id=user_id)
             words = user_message.split()[:5]
             chat_session.title = " ".join(words) + ("..." if len(user_message.split()) > 5 else "")
@@ -1164,10 +1385,9 @@ async def chat(
             chat_id = chat_session.id
             _persist_chat_session(chat_session)
         else:
-            chat_session = chat_sessions[chat_id]
             if chat_session.user_id != user_id:
                 return JSONResponse(status_code=404, content={"error": "Chat not found"})
-            chat_session.updated_at = datetime.now()
+            chat_session.updated_at = datetime.now(timezone.utc)
 
         # Resolve short acknowledgements after chat context is known.
         resolved_user_message = _resolve_short_reply_context(user_message, chat_session)
@@ -1276,15 +1496,21 @@ async def chat(
         chat_session.messages.append({
             "role": "user",
             "content": user_message,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         chat_session.messages.append({
             "role": "assistant",
             "content": reply,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         _persist_chat_session(chat_session)
         enforce_user_chat_token_budget(user_id)
+        _record_usage_log(
+            user_id=user_id,
+            session_id=chat_id,
+            usage=usage,
+            model_used=str(usage.get("model") or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")),
+        )
 
         log_event(
             "chat_completed",
@@ -1362,17 +1588,29 @@ async def get_chats(x_user_id: str = Header(..., alias="X-User-ID")):
     user_id = (x_user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="X-User-ID header is required")
-    sessions = []
-    for chat_id, session in sorted(chat_sessions.items(), key=lambda x: x[1].updated_at, reverse=True):
-        if session.user_id != user_id:
-            continue
-        sessions.append(ChatSessionResponse(
-            id=session.id,
-            title=session.title,
-            created_at=session.created_at.isoformat(),
-            updated_at=session.updated_at.isoformat(),
-            message_count=len(session.messages)
-        ))
+    with get_relational_session() as db:
+        rows = (
+            db.query(DBChatSession)
+            .filter(DBChatSession.user_id == user_id)
+            .order_by(DBChatSession.updated_at.desc())
+            .all()
+        )
+        sessions = []
+        for row in rows:
+            message_count = (
+                db.query(DBChatMessage)
+                .filter(DBChatMessage.session_id == row.id)
+                .count()
+            )
+            sessions.append(
+                ChatSessionResponse(
+                    id=row.id,
+                    title=row.title or "New Chat",
+                    created_at=(row.created_at or datetime.now(timezone.utc)).isoformat(),
+                    updated_at=(row.updated_at or datetime.now(timezone.utc)).isoformat(),
+                    message_count=message_count,
+                )
+            )
     return sessions
 
 
@@ -1381,11 +1619,12 @@ async def get_chat(chat_id: str, x_user_id: str = Header(..., alias="X-User-ID")
     user_id = (x_user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="X-User-ID header is required")
-    if chat_id not in chat_sessions:
+    session = chat_sessions.get(chat_id) or _load_chat_session_from_relational(chat_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    session = chat_sessions[chat_id]
     if session.user_id != user_id:
         raise HTTPException(status_code=404, detail="Chat not found")
+    chat_sessions[session.id] = session
     return {
         "id": session.id,
         "user_id": session.user_id,
@@ -1401,11 +1640,12 @@ async def delete_chat(chat_id: str, x_user_id: str = Header(..., alias="X-User-I
     user_id = (x_user_id or "").strip()
     if not user_id:
         raise HTTPException(status_code=400, detail="X-User-ID header is required")
-    if chat_id not in chat_sessions:
+    session = chat_sessions.get(chat_id) or _load_chat_session_from_relational(chat_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Chat not found")
-    if chat_sessions[chat_id].user_id != user_id:
+    if session.user_id != user_id:
         raise HTTPException(status_code=404, detail="Chat not found")
-    del chat_sessions[chat_id]
+    chat_sessions.pop(chat_id, None)
     _delete_chat_session_storage(chat_id)
     return {"status": "deleted", "chat_id": chat_id}
 
@@ -1426,6 +1666,48 @@ async def create_new_chat(x_user_id: str = Header(..., alias="X-User-ID")):
         updated_at=chat_session.updated_at.isoformat(),
         message_count=0
     )
+
+
+@app.get("/settings")
+async def get_user_settings(x_user_id: str = Header(..., alias="X-User-ID")):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    with get_relational_session() as db:
+        row = _get_or_create_user_settings(user_id=user_id, db=db)
+        return {
+            "user_id": user_id,
+            "tone_preference": row.tone_preference,
+            "memory_enabled": bool(row.memory_enabled),
+            "reasoning_mode": row.reasoning_mode,
+            "updated_at": (row.updated_at or datetime.now(timezone.utc)).isoformat(),
+        }
+
+
+@app.post("/settings")
+async def update_user_settings(
+    payload: UserSettingsUpdate,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    user_id = (x_user_id or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="X-User-ID header is required")
+    with get_relational_session() as db:
+        row = _get_or_create_user_settings(user_id=user_id, db=db)
+        if payload.tone_preference is not None:
+            row.tone_preference = str(payload.tone_preference).strip() or "balanced"
+        if payload.memory_enabled is not None:
+            row.memory_enabled = bool(payload.memory_enabled)
+        if payload.reasoning_mode is not None:
+            row.reasoning_mode = str(payload.reasoning_mode).strip() or "standard"
+        row.updated_at = datetime.now(timezone.utc)
+        return {
+            "user_id": user_id,
+            "tone_preference": row.tone_preference,
+            "memory_enabled": bool(row.memory_enabled),
+            "reasoning_mode": row.reasoning_mode,
+            "updated_at": row.updated_at.isoformat(),
+        }
 
 
 @app.get("/memories")
@@ -1559,6 +1841,12 @@ async def chat_agent(
     metrics.inc("llm_cost_usd_total", usage["cost_est_usd"])
     if settings.enable_background_tasks and settings.enable_semantic_memory:
         background_tasks.add_task(enqueue_ingest_message, user_id, message, "", "user")
+    _record_usage_log(
+        user_id=user_id,
+        session_id=request.chat_id,
+        usage=usage,
+        model_used=str(usage.get("model") or os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")),
+    )
     return AgentChatResponse(reply=reply, tool_events=result.get("tool_events") or [], usage=usage)
 
 
@@ -1605,9 +1893,17 @@ async def get_metrics():
 
 @app.get("/health")
 async def health():
+    vector_backend = "disabled"
+    if settings.enable_semantic_memory:
+        try:
+            vector_backend = get_semantic_memory_service().store.__class__.__name__
+        except Exception as exc:
+            vector_backend = f"error:{type(exc).__name__}"
     return {
         "status": "ok",
         "api_key_loaded": api_key_loaded,
+        "truth_db": "relational_sqlalchemy",
+        "vector_store_backend": vector_backend,
         "semantic_memory_enabled": settings.enable_semantic_memory,
         "streaming_enabled": settings.enable_streaming,
         "tools_enabled": settings.enable_tools,

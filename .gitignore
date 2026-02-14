@@ -18,3 +18,7 @@ ENV/
 # frontend build artifacts
 frontend-vite/node_modules/
 frontend-vite/dist/
+
+# runtime state
+memory/*.db
+memory/structured_memory.json

@@ -27,6 +27,7 @@ class Settings:
     qdrant_url: str
     qdrant_api_key: str
     qdrant_collection: str
+    require_qdrant: bool
     embedding_provider: str
     embedding_model: str
     embedding_dims: int
@@ -96,6 +97,7 @@ def get_settings() -> Settings:
         qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
         qdrant_api_key=os.getenv("QDRANT_API_KEY", "").strip(),
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "mnemos_semantic_memory").strip() or "mnemos_semantic_memory",
+        require_qdrant=_env_bool("REQUIRE_QDRANT", False),
         embedding_provider=os.getenv("EMBEDDING_PROVIDER", "local").strip().lower(),
         embedding_model=os.getenv("EMBEDDING_MODEL", "bge-small-en-v1.5").strip(),
         embedding_dims=_env_int("EMBEDDING_DIMS", 384),

@@ -395,6 +395,7 @@ _brain_service: BrainService | None = None
 def get_brain_service(base_dir: Path) -> BrainService:
     global _brain_service
     if _brain_service is None:
+        # Legacy JSON path is used only for one-time migration into relational tables.
         path = base_dir / "memory" / "structured_memory.json"
         _brain_service = BrainService(store=get_brain_store(path=path))
     return _brain_service

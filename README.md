@@ -24,9 +24,9 @@ Background semantic memory ingestion + decay/compression hooks
 
 ## Tech Stack (Current)
 
-- Backend: Python, FastAPI, Uvicorn, Pydantic v2, python-dotenv
+- Backend: Python, FastAPI, Uvicorn, Pydantic v2, python-dotenv, SQLAlchemy
 - LLM: Groq Python SDK (`groq`) with model from `GROQ_MODEL` (default `llama-3.1-8b-instant`)
-- Memory/Data: classic memory store + semantic vector store (Qdrant when available, JSON fallback), optional MongoDB via PyMongo (`ENABLE_MONGO=true`)
+- Data: relational truth DB for users/sessions/messages/usage/settings (`DATABASE_URL`), semantic vector store in Qdrant (`QDRANT_URL` + `QDRANT_API_KEY`), optional local vector fallback
 - Auth/Security: username/password auth (PBKDF2-HMAC with `hashlib` + `hmac`), JWT via `python-jose`, CORS middleware, request-id + security headers + prompt guard + rate limiting
 - Realtime/HTTP: `httpx` for realtime web lookups and Google token verification
 - Observability: structured app logs + Prometheus-style metrics endpoint (`/metrics`)
@@ -56,8 +56,7 @@ project_root/
 |   |-- memory_extractor.py
 |   |-- memory_retriever.py
 |   |-- memories.json                   # default memory persistence
-|   |-- chat_sessions.json              # default chat persistence
-|   |-- users.json                      # simple auth user store
+|   |-- app.db                          # relational truth DB (SQLite default)
 |   `-- semantic_memories.json          # semantic vector fallback storage
 |-- frontend/
 |   |-- index.html
@@ -106,7 +105,7 @@ pip install -r requirements.txt
    cp .env.example .env
    ```
 
-2. The `.env.example` already contains an example API key. For production, replace it with your own:
+2. Add your Groq API key in `.env`:
    ```
    GROQ_API_KEY=your_actual_api_key_here
    ```
@@ -175,13 +174,18 @@ Vite dev server starts on `http://localhost:5173` and proxies API calls to `http
 ## Key Environment Variables
 
 ```env
+# truth database
+DATABASE_URL=sqlite:///memory/app.db
+
 # semantic memory
 ENABLE_SEMANTIC_MEMORY=true
 EMBEDDING_PROVIDER=local
 EMBEDDING_MODEL=bge-small-en-v1.5
 EMBEDDING_DIMS=384
 QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
 QDRANT_COLLECTION=mnemos_semantic_memory
+REQUIRE_QDRANT=false
 
 # streaming/tools/background
 ENABLE_STREAMING=true
@@ -294,6 +298,10 @@ Tool-enabled route for structured tool usage (`calculator`, `currency_convert`, 
 
 List tool schemas exposed by the tool registry.
 
+### GET `/settings` and POST `/settings`
+
+Read/update persisted user settings from relational DB (`tone_preference`, `memory_enabled`, `reasoning_mode`).
+
 ### GET `/memories/semantic`
 
 List semantic memory records for the current `X-User-ID`.
@@ -323,6 +331,8 @@ Health check endpoint.
 {
   "status": "ok",
   "api_key_loaded": true,
+  "truth_db": "relational_sqlalchemy",
+  "vector_store_backend": "QdrantVectorStoreRepository",
   "semantic_memory_enabled": true,
   "streaming_enabled": true,
   "tools_enabled": true
@@ -331,9 +341,9 @@ Health check endpoint.
 
 ## Notes
 
-- Memory persistence defaults to local JSON files (`memory/memories.json`, `memory/chat_sessions.json`, `memory/users.json`)
+- Users/chat history/usage/settings persistence defaults to relational SQL (`DATABASE_URL`, SQLite at `memory/app.db` by default)
 - Semantic memory fallback persistence is `memory/semantic_memories.json`
-- Optional MongoDB persistence is available with `ENABLE_MONGO=true`
+- Optional strict Qdrant mode can be enabled with `REQUIRE_QDRANT=true`
 - Backend never crashes - all errors returned as JSON
 - Uses Groq `llama-3.1-8b-instant` model for fast responses
 
@@ -356,7 +366,7 @@ Health check endpoint.
 ## Scaling Guide
 
 - Increase API replicas horizontally behind load balancing.
-- Move from JSON fallback to Qdrant + MongoDB for durable, distributed state.
+- Use Postgres/MySQL via `DATABASE_URL` for durable distributed truth state and Qdrant for semantic memory.
 - Offload embedding/decay/compression work to Celery workers.
 - Apply stricter rate limits and per-user quotas under higher concurrency.
 

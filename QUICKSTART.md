@@ -50,8 +50,11 @@ ENABLE_TOOLS=true
 
 Optional vector backend:
 ```env
+DATABASE_URL=sqlite:///memory/app.db
 QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
 QDRANT_COLLECTION=mnemos_semantic_memory
+REQUIRE_QDRANT=false
 ```
 
 ## Useful Endpoints
@@ -60,6 +63,8 @@ QDRANT_COLLECTION=mnemos_semantic_memory
 - `POST /chat/stream`
 - `POST /chat/agent`
 - `GET /tools`
+- `GET /settings`
+- `POST /settings`
 - `GET /memories/semantic`
 - `DELETE /memories/semantic/{memory_id}`
 - `POST /admin/semantic/decay`

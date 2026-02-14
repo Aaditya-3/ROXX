@@ -45,7 +45,10 @@ async def platform_config():
         "streaming_enabled": settings.enable_streaming,
         "tools_enabled": settings.enable_tools,
         "brain_layer_enabled": True,
-        "structured_memory_store": "memory/structured_memory.json",
+        "structured_memory_store": "relational_db:user_preferences,user_events",
+        "truth_db": "DATABASE_URL",
+        "vector_db": f"qdrant:{settings.qdrant_collection}",
+        "require_qdrant": settings.require_qdrant,
         "ranking_weights": {
             "similarity": cfg.ranking_weights.similarity,
             "importance": cfg.ranking_weights.importance,

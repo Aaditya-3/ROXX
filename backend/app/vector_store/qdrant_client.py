@@ -20,7 +20,9 @@ def get_qdrant_client() -> Any | None:
     if settings.qdrant_api_key:
         kwargs["api_key"] = settings.qdrant_api_key
     try:
-        return QdrantClient(**kwargs)
+        client = QdrantClient(**kwargs)
+        # Validate auth/endpoint early so runtime can fail fast when required.
+        client.get_collections()
+        return client
     except Exception:
         return None
-
